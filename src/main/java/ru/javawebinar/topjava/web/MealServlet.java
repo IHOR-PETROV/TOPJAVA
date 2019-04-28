@@ -2,10 +2,12 @@ package ru.javawebinar.topjava.web;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.context.support.ClassPathXmlApplicationContext;
 import ru.javawebinar.topjava.model.Meal;
-import ru.javawebinar.topjava.repository.MealRepository;
-import ru.javawebinar.topjava.repository.inmemory.InMemoryMealRepositoryImpl;
+import ru.javawebinar.topjava.to.MealTo;
 import ru.javawebinar.topjava.util.MealsUtil;
+import ru.javawebinar.topjava.web.meal.MealRestController;
 
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletException;
@@ -15,23 +17,35 @@ import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Objects;
 
 public class MealServlet extends HttpServlet {
     private static final Logger log = LoggerFactory.getLogger(MealServlet.class);
 
-    private MealRepository repository;
+    private MealRestController controller;
 
     @Override
     public void init(ServletConfig config) throws ServletException {
         super.init(config);
-        repository = new InMemoryMealRepositoryImpl();
+        // repository = new InMemoryMealRepositoryImpl();
+        try (ConfigurableApplicationContext appCtx = new ClassPathXmlApplicationContext("spring/spring-app.xml")) {
+            controller = appCtx.getBean(MealRestController.class);
+
+            //mealRestController.create(new Meal(LocalDateTime.now(), "Завтрак", 488), SecurityUtil.authUserId());
+
+
+        }
     }
+
+
 
     @Override
     protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
         request.setCharacterEncoding("UTF-8");
         String id = request.getParameter("id");
+
 
         Meal meal = new Meal(id.isEmpty() ? null : Integer.valueOf(id),
                 LocalDateTime.parse(request.getParameter("dateTime")),
@@ -39,34 +53,64 @@ public class MealServlet extends HttpServlet {
                 Integer.parseInt(request.getParameter("calories")));
 
         log.info(meal.isNew() ? "Create {}" : "Update {}", meal);
-        repository.save(meal);
+        if (meal.isNew()) {
+            controller.create(meal );
+        } else controller.update(meal );
+
         response.sendRedirect("meals");
     }
 
     @Override
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
         String action = request.getParameter("action");
+        Integer userId;
+        try {
+            userId = Integer.parseInt(request.getParameter("userId"));
+            SecurityUtil.setUserId(userId);
+
+        } catch (NumberFormatException e) {
+            log.info("NumberFormatException : " + e.getMessage());
+        }
+
 
         switch (action == null ? "all" : action) {
             case "delete":
                 int id = getId(request);
                 log.info("Delete {}", id);
-                repository.delete(id);
+                controller.delete(id);
                 response.sendRedirect("meals");
                 break;
             case "create":
             case "update":
                 final Meal meal = "create".equals(action) ?
                         new Meal(LocalDateTime.now().truncatedTo(ChronoUnit.MINUTES), "", 1000) :
-                        repository.get(getId(request));
+                        controller.get(getId(request) );
                 request.setAttribute("meal", meal);
                 request.getRequestDispatcher("/mealForm.jsp").forward(request, response);
                 break;
             case "all":
             default:
                 log.info("getAll");
-                request.setAttribute("meals",
-                        MealsUtil.getWithExcess(repository.getAll(), MealsUtil.DEFAULT_CALORIES_PER_DAY));
+                List<MealTo> listMeals = controller.getAll();
+                String sort = request.getParameter("sort");
+                if (sort != null) {
+                    if (sort.equals("Date")) {
+                        listMeals.sort((Comparator<MealTo>)
+                                (m1, m2) -> m2.getDateTime().compareTo(m1.getDateTime()));
+                    }
+                    if (sort.equals("Calories")) {
+                        listMeals.sort((Comparator<MealTo>)
+                                (m1, m2) -> m2.getCalories() - m1.getCalories());
+                    }
+                    if (sort.equals("Descriptoin")) {
+                        listMeals.sort((Comparator<MealTo>)
+                                (m1, m2) -> m2.getDescription().compareTo( m1.getDescription()));
+                    }
+                }
+
+
+                request.setAttribute("meals", listMeals);
+
                 request.getRequestDispatcher("/meals.jsp").forward(request, response);
                 break;
         }

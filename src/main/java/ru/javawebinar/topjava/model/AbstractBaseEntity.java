@@ -1,7 +1,7 @@
 package ru.javawebinar.topjava.model;
 
 public abstract class AbstractBaseEntity {
-    protected Integer id;
+    protected Integer id = null;
 
     protected AbstractBaseEntity(Integer id) {
         this.id = id;
